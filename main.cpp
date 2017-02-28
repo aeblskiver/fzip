@@ -10,7 +10,7 @@
 char * output_file;
 /*
  * TODO: Find a way to put treewalk into single fzip file
- * TODO: Extraction
+ * TODO: Directory Extraction
  */
 
 //You must fill out your name and id below
@@ -69,15 +69,15 @@ int archive(const char *path, const struct stat *sb,
     strcat(output_file,path_fzip);*/
 
     //Get file descriptor for output file
-    int output_fd = open(output_file, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    int output_fd = open(output_file, O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (output_fd < 0)
         return -1;
 
     int title_size = strlen(path);
     int file_size = sb->st_size;
-    int bits_written;
+    ssize_t bits_written;
 
-    switch (typeflag & S_IFMT){
+    switch (typeflag){
         case FTW_F:
             bits_written = write(output_fd,&file_flag,sizeof(char));                    //Write file flag
             bits_written = write(output_fd, &title_size, sizeof(int));         //Write size of title
@@ -94,8 +94,11 @@ int archive(const char *path, const struct stat *sb,
 
             break;
         case FTW_D:
-            write(output_fd,&dir_flag,1);
-
+            write(output_fd,&dir_flag,sizeof(char));
+            write(output_fd,&title_size,sizeof(int));
+            write(output_fd,path,title_size);
+            close(input_fd);
+            close(output_fd);
             break;
         default:
             printf("I did nothing");
@@ -117,32 +120,58 @@ int archive(const char *path, const struct stat *sb,
 int extract(const char * path) {
     int arch_fd = open(path, O_RDONLY);
     char buffer[BUFFER_SIZE];
-    char flagbuffer[sizeof(char)];
+    char file_flag;
     int titlesize;
     ssize_t rd_in;
 
-    while (read(arch_fd,flagbuffer,1)) {
-        if (strcmp(flagbuffer, "0") == 0) {
-            read(arch_fd, &titlesize, sizeof(int));
-            char * title = (char *) malloc(titlesize);
-            read(arch_fd,title,titlesize);
+    //Read the file flag first, then proceed based on flag
+    while (read(arch_fd,&file_flag,1)) {
+        //If it's a file then make the file and write contents
+        switch (file_flag) {
+            case '0': {
+                //Read title size, allocate memory and read/set title
+                //TODO Append something to end of title since it already exists
+                read(arch_fd, &titlesize, sizeof(int));
+                char *file_title = (char *) malloc(titlesize);
+                read(arch_fd, file_title, titlesize);
 
-            //Append "_output" to our file
+                //Create a file with the title
+                int fd = open(file_title, O_WRONLY | O_CREAT | O_EXCL, 0666);
+                if (fd < 0)
+                    return -1;
 
-            int fd = open(title, O_WRONLY | O_CREAT | O_EXCL | O_APPEND, 0666);
-            if (fd < 0)
-                return -1;
+                free(file_title);
 
-            free(title);
-            int content_size;
-            read(arch_fd,&content_size,sizeof(size_t));
+                //Set size of the contents
+                int content_size;
+                read(arch_fd, &content_size, sizeof(size_t));
 
-            //Write the contents
-            char * contents = (char *) malloc(content_size);
-            read(arch_fd,contents,content_size);
-            write(fd,contents,content_size);
-            free(contents);
-            close(fd);
+                //Write the contents
+                char *contents = (char *) malloc(content_size);
+                read(arch_fd, contents, content_size);
+                write(fd, contents, content_size);
+                free(contents);
+                close(fd);
+                break;
+            }
+            case '1': {
+                //Read title size, allocate memory and read/set title
+                //TODO Append something to end of folder since it already exists (_"extracted")
+                read(arch_fd, &titlesize, sizeof(int));
+                char *folder_title = (char *) malloc(titlesize);
+                read(arch_fd, folder_title, titlesize);
+
+                //Create a folder with the title
+                if (mkdir(folder_title, 0666) < 0) {
+                    perror("Error making directory");
+                    return (EXIT_FAILURE);
+                }
+                free(folder_title);
+                break;
+            }
+            default:
+                break;
+
         }
         close(arch_fd);
         return 1;
