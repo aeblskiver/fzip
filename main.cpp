@@ -54,7 +54,7 @@ char * parseArg(int argc, char *argv[]) {
 int archive(const char *path, const struct stat *sb,
              int typeflag, struct FTW *ftwbuf) {
     char file_flag = '0';
-    char * dir_flag = "1";
+    char dir_flag = '1';
     char buffer[BUFFER_SIZE];
     ssize_t rd_in;
 
