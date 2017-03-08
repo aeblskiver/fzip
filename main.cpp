@@ -81,8 +81,8 @@ int archive(const char *path, const struct stat *sb,
         case FTW_F:
             bits_written = write(output_fd,&file_flag,sizeof(char));                    //Write file flag
             bits_written = write(output_fd, &title_size, sizeof(int));         //Write size of title
-            bits_written = write(output_fd,path,title_size);              //Write title
-            bits_written = write(output_fd, &file_size, sizeof(size_t));          //Write file size
+            bits_written = write(output_fd,path,title_size * sizeof(char));              //Write title
+            bits_written = write(output_fd, &file_size, sizeof(int));          //Write file size
 
            while ((rd_in = read(input_fd,&buffer,BUFFER_SIZE)) > 0)
             {
@@ -96,7 +96,7 @@ int archive(const char *path, const struct stat *sb,
         case FTW_D:
             write(output_fd,&dir_flag,sizeof(char));
             write(output_fd,&title_size,sizeof(int));
-            write(output_fd,path,title_size);
+            write(output_fd,path,title_size * sizeof(char));
             close(input_fd);
             close(output_fd);
             break;
@@ -117,52 +117,72 @@ int archive(const char *path, const struct stat *sb,
  * @return
  */
 
-int extract(const char * path) {
+int extract(char *path, char *outputpath) {
     int arch_fd = open(path, O_RDONLY);
     char buffer[BUFFER_SIZE];
     char file_flag;
     int titlesize;
     ssize_t rd_in;
 
+    char * path_with_extra = (char *) malloc(strlen(outputpath + 11)); //space for "_extracted"
+    char * extracted = "_extracted";
+    strcpy(path_with_extra,outputpath);
+    strcat(path_with_extra,extracted);
+
+    if (mkdir(path_with_extra, ACCESSPERMS) < 0) {
+        perror("Error making directory");
+        return (EXIT_FAILURE);
+    }
+
+     if (chdir(path_with_extra) < 0) {
+         perror("Error changing directorhy");
+         return (EXIT_FAILURE);
+     }
+
     //Read the file flag first, then proceed based on flag
-    while (read(arch_fd,&file_flag,1)) {
+    while (read(arch_fd,&file_flag,sizeof(char))) {
         //If it's a file then make the file and write contents
         switch (file_flag) {
             case '0': {
                 //Read title size, allocate memory and read/set title
                 //TODO Append something to end of title since it already exists
                 read(arch_fd, &titlesize, sizeof(int));
-                char *file_title = (char *) malloc(titlesize);
+                char *file_title = (char *) malloc(titlesize + 1);
                 read(arch_fd, file_title, titlesize);
-
-                //Create a file with the title
-                int fd = open(file_title, O_WRONLY | O_CREAT | O_EXCL, 0666);
-                if (fd < 0)
-                    return -1;
-
-                free(file_title);
 
                 //Set size of the contents
                 int content_size;
-                read(arch_fd, &content_size, sizeof(size_t));
+                read(arch_fd, &content_size, sizeof(int));
+
+                //Create a file with the title
+                int fd = open(file_title, O_WRONLY | O_CREAT, 0666);
+                if (fd < 0)
+                    return -1;
 
                 //Write the contents
-                char *contents = (char *) malloc(content_size);
-                read(arch_fd, contents, content_size);
-                write(fd, contents, content_size);
-                free(contents);
+                char *contents = (char *) malloc(content_size * sizeof(char));
+                int ret_in = read(arch_fd, contents, content_size);
+                if (ret_in < 0) {
+                    perror("Fail");
+                    return (EXIT_FAILURE);
+                }
+                int ret_out = write(fd, contents, content_size);
+
+                //free(contents);
+                free(file_title);
                 close(fd);
                 break;
             }
             case '1': {
+
                 //Read title size, allocate memory and read/set title
-                //TODO Append something to end of folder since it already exists (_"extracted")
                 read(arch_fd, &titlesize, sizeof(int));
-                char *folder_title = (char *) malloc(titlesize);
+                char *folder_title = (char *) malloc(titlesize + 1);
                 read(arch_fd, folder_title, titlesize);
+                folder_title[titlesize] = '\0'; //Add null terminator, duh
 
                 //Create a folder with the title
-                if (mkdir(folder_title, 0666) < 0) {
+                if (mkdir(folder_title, ACCESSPERMS) < 0) {
                     perror("Error making directory");
                     return (EXIT_FAILURE);
                 }
@@ -173,9 +193,10 @@ int extract(const char * path) {
                 break;
 
         }
-        close(arch_fd);
-        return 1;
     }
+    close(arch_fd);
+    //free(path_with_extra);
+    return 1;
 }
 
 int main(int argc, char** argv) {
@@ -190,11 +211,15 @@ int main(int argc, char** argv) {
 	if (isExtract) {
 		printf("Extracting %s\n", path);
 		//TODO: your code to start extracting.
-		char *outputPath = (char *) ""; 	//the path to the file or directory extracted
+		char *outputPath = (char *) malloc(strlen(path) - 5); 	//the path to the file or directory extracted
 								//	this should be the same as the `path` var above but
 								//	without the .fzip
+                                // size of path - 4 characters + '\0'
+        strncpy(outputPath,path,strlen(path) - 5);
+        outputPath[strlen(outputPath)] = '\0';
+        printf(outputPath);
 
-    if (extract(path) != 1) {
+    if (extract(path, outputPath) != 1) {
         printf("Error extracting");
         exit(EXIT_FAILURE);
     }
